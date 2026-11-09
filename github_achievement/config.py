@@ -4,6 +4,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Mapping
 
+from .messages import MESSAGE_DEFAULTS
+
 
 def read_env(path: Path) -> dict[str, str]:
     """Read literal KEY=value pairs. Never evaluate shell expressions."""
@@ -44,6 +46,11 @@ class Config:
     coauthor_name: str = ""
     coauthor_email: str = ""
     category_id: str = ""
+    pr_title: str = ""
+    pr_body: str = ""
+    commit_message: str = ""
+    merge_title: str = ""
+    merge_message: str = ""
 
     @classmethod
     def load(cls, path: Path, environ: Mapping[str, str] | None = None, repo: str | None = None):
@@ -57,7 +64,8 @@ class Config:
                    helper_token=values.get("HELPER_TOKEN", ""),
                    coauthor_name=values.get("COAUTHOR_NAME", ""),
                    coauthor_email=values.get("COAUTHOR_EMAIL", ""),
-                   category_id=values.get("DISCUSSION_CATEGORY_ID", ""))
+                   category_id=values.get("DISCUSSION_CATEGORY_ID", ""),
+                   **{key: values.get(key.upper(), "") for key in MESSAGE_DEFAULTS})
 
     def validate(self, workflow: str | None = None, *, credentials: bool = False):
         validate_repo(self.repo)

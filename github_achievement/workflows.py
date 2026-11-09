@@ -6,6 +6,7 @@ from urllib.parse import quote, urlencode
 
 from .api import GitHubError
 from .cleanup import delete_merged_branch
+from .messages import PR_WORKFLOWS, PREVIEW_OPERATION, render_messages
 
 
 CATEGORIES_QUERY = """query Categories($owner: String!, $name: String!, $cursor: String) {
@@ -53,6 +54,8 @@ class WorkflowRunner:
 
     def preflight(self, workflow=None):
         self.config.validate(workflow, credentials=True)
+        if workflow in PR_WORKFLOWS:
+            render_messages(self.config, workflow, PREVIEW_OPERATION)
         self.report("Checking primary account and repository access")
         self.user = self.primary.request("GET", "/user")
         self.repository = self.primary.request("GET", self.prefix)
@@ -211,6 +214,8 @@ class WorkflowRunner:
             raise
 
     def pull_request(self, workflow, operation_id, checkpoint):
+        messages = render_messages(self.config, workflow, operation_id,
+                                   coauthor=(self.coauthor_name, self.coauthor_email))
         branch = f"achievement/{workflow}/{operation_id}"
         path = f".github-achievements/{workflow}.json"
         base_sha = self.head()
@@ -224,11 +229,8 @@ class WorkflowRunner:
         except GitHubError as exc:
             if exc.status != 404:
                 raise
-        message = f"Record {workflow} workflow {operation_id[:8]}"
-        if workflow == "pair-extraordinaire":
-            message += f"\n\nCo-authored-by: {self.coauthor_name} <{self.coauthor_email}>"
         content = json.dumps({"workflow": workflow, "operation": operation_id}, indent=2) + "\n"
-        payload = {"message": message, "content": base64.b64encode(content.encode()).decode(), "branch": branch}
+        payload = {"message": messages["commit_message"], "content": base64.b64encode(content.encode()).decode(), "branch": branch}
         if existing_sha:
             payload["sha"] = existing_sha
         commit = self.primary.request("PUT", file_url, payload)
@@ -238,9 +240,9 @@ class WorkflowRunner:
             self.verify_coauthors(commit_sha)
         checkpoint(stage="open_pull_request", commit_sha=commit_sha)
         pr = self.primary.request("POST", f"{self.prefix}/pulls", {
-            "title": f"Achievement workflow: {workflow} ({operation_id[:8]})",
+            "title": messages["pr_title"],
             "head": branch, "base": self.repository["default_branch"],
-            "body": f"Created by github-achievement-python.\n\nWorkflow: {workflow}\nOperation: {operation_id}",
+            "body": messages["pr_body"],
         })
         checkpoint(stage="check_mergeability", number=pr["number"], url=pr["html_url"])
         self.wait_for_mergeable(pr["number"], commit_sha, workflow)
@@ -248,6 +250,7 @@ class WorkflowRunner:
         merger = self.helper if workflow == "yolo" else self.primary
         merged = merger.request("PUT", f"{self.prefix}/pulls/{pr['number']}/merge", {
             "merge_method": "merge", "sha": commit_sha,
+            "commit_title": messages["merge_title"], "commit_message": messages["merge_message"],
         })
         if not merged.get("merged"):
             raise GitHubError(f"PR #{pr['number']} was not merged: {merged.get('message', 'unknown reason')}")

@@ -66,6 +66,32 @@ These are community-reported thresholds, not guarantees of badge awards. Counts 
 
 Keep `.achievement-state/progress.sqlite3` between runs. Use `--state-dir PATH` to choose another location. A failed/interrupted operation is not automatically replayed. Inspect its recorded PR, issue, or discussion before starting a new operation: GitHub may have completed a write even if its response was lost. Cleanup updates branch-cleanup details without changing success counts.
 
+## Message options
+
+For Pull Shark, Pair Extraordinaire, and YOLO, use the [README message setup](README.md#customize-pr-and-commit-messages) for persistent defaults. To change only one run, add any of these options:
+
+| `.env` setting | Command option | Changes |
+| --- | --- | --- |
+| `PR_TITLE` | `--pr-title` | Pull request title |
+| `PR_BODY` | `--pr-body` | Pull request description |
+| `COMMIT_MESSAGE` | `--commit-message` | Activity-file commit message |
+| `MERGE_TITLE` | `--merge-title` | Merge commit title |
+| `MERGE_MESSAGE` | `--merge-message` | Merge commit description |
+
+For example, preview one co-authored PR with a custom title and commit message:
+
+```powershell
+python main.py run pair-extraordinaire --count 1 --pr-title "Record {badge} activity together" --commit-message "Save the co-authored activity record"
+```
+
+Add `--execute` to run the previewed workflow. Command options override shell variables, which override `.env`; an empty value uses the built-in default. Customizations do not change what files the workflow edits. Shared `.env` message settings are ignored for Quickdraw and Galaxy Brain; supplying PR message options directly for those badges is an error.
+
+Templates accept only `{badge}`, `{workflow}`, `{repo}`, and `{path}`. Use `{{` and `}}` for literal braces and `\n` for newlines in descriptions and commit messages. Template expressions do not execute Python or shell code. The full journal operation ID is appended to every field, including across separate runs. The sample ID shown in a preview is replaced at execution.
+
+The app validates all five messages before writing a branch, including merge text and the resolved Pair co-author trailer. Titles must be single-line and at most 256 UTF-8 bytes; descriptions and commit messages must fit within 65,536 UTF-8 bytes, including automatic metadata. Invalid placeholders, control characters, or manually supplied co-author trailers stop the run. Shorten the template if its expanded text exceeds these limits.
+
+Pair Extraordinaire retains its verified helper credit on the original commit. The PR is merged with a merge commit, preserving that co-authored commit. Custom merge messages also apply when the YOLO helper performs the merge. API pacing, rate-limit handling, and branch cleanup apply as usual.
+
 ## API pacing and retries
 
 All clients in a run share serial write pacing. Eight seconds between writes limits this app's write rate, but other apps and website actions can consume the same account's quota. The client honors `Retry-After` and `X-RateLimit-Reset`, notices exhausted quota on successful responses, and handles GraphQL rate errors returned with HTTP 200.

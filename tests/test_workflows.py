@@ -7,6 +7,7 @@ from pathlib import Path
 
 from github_achievement.api import GitHubError
 from github_achievement.config import Config
+from github_achievement.messages import render_messages
 from github_achievement.state import StateStore
 from github_achievement.workflows import WorkflowRunner
 
@@ -149,7 +150,10 @@ class WorkflowTests(unittest.TestCase):
         pr = next(p for m, path, p in self.primary.calls if m == "POST" and path.endswith("/pulls"))
         self.assertEqual(pr["base"], "release/main")
         merge = next(p for m, path, p in self.primary.calls if path.endswith("/merge"))
-        self.assertEqual(merge, {"sha": "commit-sha", "merge_method": "merge"})
+        self.assertEqual(merge["sha"], "commit-sha")
+        self.assertEqual(merge["merge_method"], "merge")
+        self.assertIn("Merge Pull Shark activity record", merge["commit_title"])
+        self.assertIn("Operation:", merge["commit_message"])
         self.assertEqual(self.store.count("alice", "alice/lab", "pull-shark"), 1)
         self.assertTrue(any("release%2Fmain" in path for _, path, _ in self.primary.calls))
 
@@ -160,6 +164,43 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(update["sha"], "old-content-sha")
         self.assertTrue(update["message"].endswith("\n\nCo-authored-by: Bob <bob@example.com>"))
         self.assertEqual(json.loads(base64.b64decode(update["content"]))["workflow"], "pair-extraordinaire")
+
+    def test_custom_pair_messages_reach_all_api_payloads_and_preserve_credit(self):
+        self.runner.config = replace(self.config, pr_title="Save {badge} record",
+                                     pr_body="Record details for {repo}\\nFile: {path}",
+                                     commit_message="Save co-authored activity\\n\\nUpdate {path}",
+                                     merge_title="Include {badge} record",
+                                     merge_message="Keep the activity record in {repo}")
+        self.execute("pair-extraordinaire")
+        operation = self.store.history()[0]["id"]
+        expected = render_messages(self.runner.config, "pair-extraordinaire", operation,
+                                   coauthor=("Bob", "bob@example.com"))
+        update = next(p for m, path, p in self.primary.calls if m == "PUT" and "/contents/" in path)
+        pr = next(p for m, path, p in self.primary.calls if m == "POST" and path.endswith("/pulls"))
+        merge = next(p for m, path, p in self.primary.calls if path.endswith("/merge"))
+        self.assertEqual(pr["title"], expected["pr_title"])
+        self.assertEqual(pr["body"], expected["pr_body"])
+        self.assertEqual(update["message"], expected["commit_message"])
+        self.assertEqual(merge["commit_title"], expected["merge_title"])
+        self.assertEqual(merge["commit_message"], expected["merge_message"])
+        self.assertTrue(update["message"].endswith("Co-authored-by: Bob <bob@example.com>"))
+        self.assertTrue(any("query CommitAuthors" in path for _, path, _ in self.primary.calls))
+
+    def test_invalid_merge_template_fails_before_any_api_calls(self):
+        self.runner.config = replace(self.config, merge_message="Invalid {unknown}")
+        with self.assertRaisesRegex(ValueError, "MERGE_MESSAGE"):
+            self.execute("pull-shark")
+        self.assertEqual(self.primary.calls, [])
+        self.assertEqual(self.store.history(), [])
+
+    def test_message_length_with_resolved_coauthor_is_checked_before_writes(self):
+        self.runner.preflight("pair-extraordinaire")
+        self.runner.coauthor_name = "B" * 65536
+        with self.assertRaisesRegex(ValueError, "COMMIT_MESSAGE exceeds"):
+            self.runner.run_one("pair-extraordinaire", self.store)
+        self.assertFalse(any(method in {"POST", "PUT", "PATCH", "DELETE"}
+                             for method, _, _ in self.primary.calls))
+        self.assertEqual(self.store.history()[0]["status"], "failed")
 
     def test_pair_requires_helper_and_rejects_self_pairing_before_writes(self):
         self.runner.config = replace(self.config, helper_token="")

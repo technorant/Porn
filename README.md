@@ -51,6 +51,8 @@ For **YOLO and Galaxy Brain**, the helper must accept the invitation before runn
 
 Never share or commit `.env`. Each person running this app uses their own tokens. The app reads `.env` automatically; you do not need to paste tokens into commands.
 
+Want your own PR titles, descriptions, and commit messages? Add the optional [message settings](#customize-pr-and-commit-messages) to this same `.env` file.
+
 ## 2. Check the repository and connection
 
 For PR badges, the repository must have at least one commit. If it is empty, add a README on GitHub. Under **Settings → General → Pull Requests**, enable **Allow merge commits**.
@@ -108,11 +110,63 @@ Use **Up/Down** to highlight an option and **Enter** to select it. You can also 
 2. Select **Unlock an achievement**.
 3. Select **Pull Shark** for the PR test, or choose another badge.
 4. Select **Base** to reach the first target using saved progress. To create exactly one new PR instead, select **Custom count** and enter **1**.
-5. Read the plan, then select **Run this workflow**. Select **Keep as preview** if you only want to see the plan.
+5. Read the plan and message preview, then select **Run this workflow**. For a PR badge, you can first select **Customize messages** to edit the text. Select **Keep as preview** if you only want to see the plan.
 6. If the selected badge needs a helper and `HELPER_TOKEN` is missing, enter the second account's token when prompted. Input stays hidden. Pull Shark does not need a helper.
 7. Wait for the progress display to finish, then press **Enter** to return to the dashboard.
 
 From the dashboard, select **Your progress** to see completed operations or **Check GitHub badges** to check your public profile. For leftover branches, select **Clean up merged branches**, read the preview, then select **Remove verified merged branches**.
+
+### Customize PR and commit messages
+
+These settings work for **Pull Shark, Pair Extraordinaire, and YOLO**. They customize the PR title, PR description, activity commit, and merge commit.
+
+**Save your messages in `.env`** to reuse them in both command and interactive runs:
+
+1. Open your existing `.env`. Keep your token and repository lines.
+2. Add these optional lines and replace the wording with your own:
+
+```dotenv
+PR_TITLE=Record {badge} activity
+PR_BODY=Update {path} in {repo}.\n\nRecord the next workflow operation.
+COMMIT_MESSAGE=Save {workflow} activity record
+MERGE_TITLE=Merge {badge} activity update
+MERGE_MESSAGE=Include this activity record in {repo}.
+```
+
+3. Save the file. Preview one PR with your messages:
+
+```powershell
+python main.py run pull-shark --count 1
+```
+
+4. If the preview looks right, run it:
+
+```powershell
+python main.py run pull-shark --count 1 --execute
+```
+
+For Pair Extraordinaire, replace `pull-shark` with `pair-extraordinaire` after setting up the helper. The app adds the verified helper's **Co-authored-by** credit automatically; do not put that trailer in your template.
+
+| Placeholder | Example replacement |
+| --- | --- |
+| `{badge}` | `Pull Shark` or `Pair Extraordinaire` |
+| `{workflow}` | `pull-shark` or `pair-extraordinaire` |
+| `{repo}` | `technorant/test` |
+| `{path}` | `.github-achievements/pull-shark.json` |
+
+Keep each `.env` entry on one line. Use `\n` inside descriptions or commit messages to create a new line; titles must stay on one line. Leave a setting empty to use its default. For literal braces, write `{{` and `}}`.
+
+**Each operation gets a unique ID**, appended to all five message fields. Even with the same template across 1,024 PRs, the complete titles, descriptions, commit messages, and merge messages differ by operation. The wording comes from your templates; the app does not invent different code changes. PR and merge descriptions retain a short automation notice.
+
+**Option 2: Edit messages in the interactive CLI**
+
+1. Run `python main.py`.
+2. Select **Unlock an achievement → Pull Shark** (or **Pair Extraordinaire** or **YOLO**), then choose your target.
+3. Select **Customize messages**.
+4. Enter each of the five templates. Press **Enter** to keep the displayed value.
+5. Review the updated preview, then choose **Run this workflow** or **Keep as preview**.
+
+Menu edits apply only to that run. To keep them for future runs, put them in `.env`. You can also [override individual messages with command options](ADVANCED.md#message-options).
 
 ## 4. Run another badge
 
