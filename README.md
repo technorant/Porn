@@ -60,6 +60,10 @@ Already using the project's virtual environment on Windows? Replace `python` wit
 
 ## 3. Run your first PR test
 
+After completing Steps 1 and 2, choose either option below. Both use the tokens and repository saved in `.env`.
+
+### Option 1: Run a command
+
 To work toward the base Pull Shark badge:
 
 ```powershell
@@ -76,11 +80,35 @@ python main.py run pull-shark --count 1 --execute
 
 The app creates a branch, makes a small activity-file change, opens and merges a PR, verifies the merge, and removes the temporary branch. Each operation takes time because API writes are paced.
 
-Prefer the menu? Run `python main.py`, choose **Unlock an achievement**, and follow the prompts. Use arrows or number keys to choose an item.
+### Option 2: Use the interactive CLI
+
+Start the menu from the project folder:
+
+```powershell
+python main.py
+```
+
+On Windows, if you use the project's virtual environment:
+
+```powershell
+.venv\Scripts\python main.py
+```
+
+Use **Up/Down** to highlight an option and **Enter** to select it. You can also press its number. **Esc** goes back.
+
+1. Check that the dashboard shows your repository, such as **technorant/test**.
+2. Select **Unlock an achievement**.
+3. Select **Pull Shark** for the PR test, or choose another badge.
+4. Select **Base** to reach the first target using saved progress. To create exactly one new PR instead, select **Custom count** and enter **1**.
+5. Read the plan, then select **Run this workflow**. Select **Keep as preview** if you only want to see the plan.
+6. If the selected badge needs a helper and `HELPER_TOKEN` is missing, enter the second account's token when prompted. Input stays hidden. Pull Shark does not need a helper.
+7. Wait for the progress display to finish, then press **Enter** to return to the dashboard.
+
+From the dashboard, select **Your progress** to see completed operations or **Check GitHub badges** to check your public profile. For leftover branches, select **Clean up merged branches**, read the preview, then select **Remove verified merged branches**.
 
 ## 4. Run another badge
 
-Use one command at a time. `--execute` performs the work; leaving it out shows a preview.
+Use **Option 2** above and select the badge you want, or run its command below. Complete the listed prerequisites first. Use one command at a time; `--execute` performs the work, and leaving it out shows a preview.
 
 ### Pair Extraordinaire
 
