@@ -33,6 +33,9 @@ class FakeGitHub:
         self.reviews = []
         self.author_logins = ["alice", "bob"]
         self.accepted_author = "alice"
+        self.branch_deleted = False
+        self.branch_sha = "commit-sha"
+        self.branch = ""
 
     def request(self, method, path, payload=None):
         self.calls.append((method, path, payload))
@@ -43,6 +46,10 @@ class FakeGitHub:
         if method == "GET" and path == REPO:
             return self.repo
         if method == "GET" and "/git/ref/heads/" in path:
+            if "achievement%2F" in path:
+                if self.branch_deleted:
+                    raise GitHubError("Reference does not exist", 404)
+                return {"object": {"sha": self.branch_sha}}
             head = self.heads.pop(0) if len(self.heads) > 1 else self.heads[0]
             return {"object": {"sha": head}}
         if method == "GET" and "/contents/" in path:
@@ -50,6 +57,8 @@ class FakeGitHub:
                 return {"sha": self.content_sha}
             raise GitHubError("Not found", 404)
         if method == "POST" and path.endswith("/git/refs"):
+            self.branch = payload["ref"].removeprefix("refs/heads/")
+            self.branch_deleted = False
             return {}
         if method == "PUT" and "/contents/" in path:
             return {"commit": {"sha": "commit-sha"}}
@@ -57,7 +66,8 @@ class FakeGitHub:
             return {"number": 7, "html_url": "https://github.com/alice/lab/pull/7"}
         if method == "GET" and path.endswith("/pulls/7"):
             mergeable = self.mergeability.pop(0) if len(self.mergeability) > 1 else self.mergeability[0]
-            return {"number": 7, "head": {"sha": "commit-sha"}, "state": "closed" if self.remote["merged"] else "open",
+            return {"number": 7, "head": {"sha": "commit-sha", "ref": self.branch, "repo": {"full_name": "alice/lab"}},
+                    "user": {"login": "alice"}, "state": "closed" if self.remote["merged"] else "open",
                     "merged": self.remote["merged"], "mergeable": mergeable, "merged_by": self.remote["merged_by"]}
         if method == "GET" and "/reviews?" in path:
             return self.reviews
@@ -68,7 +78,10 @@ class FakeGitHub:
             return self.merge_result
         if method == "DELETE":
             if self.cleanup_error:
+                if self.cleanup_error.status in {404, 422}:
+                    self.branch_deleted = True
                 raise self.cleanup_error
+            self.branch_deleted = True
             return {}
         if method == "POST" and path.endswith("/issues"):
             return {"number": 8, "html_url": "https://github.com/alice/lab/issues/8", "created_at": "2026-01-01T00:00:00Z"}

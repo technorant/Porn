@@ -1,3 +1,5 @@
 include .env.example
 include requirements.txt
+include main.py
+include ADVANCED.md
 recursive-include tests *.py

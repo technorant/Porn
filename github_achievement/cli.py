@@ -16,6 +16,7 @@ from .workflows import WorkflowRunner
 from .badges import check_badges
 from .onboarding import ensure_credentials, setup
 from .ui import Choice, Console
+from .cleanup import cleanup_tracked
 
 
 def positive_int(value):
@@ -56,6 +57,7 @@ def build_parser():
         ("doctor", "Check authentication and repository access without changing GitHub"),
         ("status", "Show the local operation journal; no network access"),
         ("verify", "Check which badges are visible on your public GitHub profile"),
+        ("cleanup", "Remove leftover merged workflow branches; previews by default"),
         ("run", "Preview or execute an achievement workflow"),
         ("reset-history", "Preview or reset the default branch with a backup branch"),
     )
@@ -76,6 +78,10 @@ def build_parser():
     commands["verify"].add_argument("--achievement", choices=ACHIEVEMENTS)
     commands["verify"].add_argument("--wait", type=badge_wait, default=0, help="Poll public profile for up to this many seconds (max 600)")
     commands["verify"].add_argument("--json", action="store_true")
+    cleanup_mode = commands["cleanup"].add_mutually_exclusive_group()
+    cleanup_mode.add_argument("--execute", action="store_true", help="Delete the verified merged workflow branches")
+    cleanup_mode.add_argument("--dry-run", action="store_true", help="Only preview the cleanup (default)")
+    commands["cleanup"].add_argument("--json", action="store_true")
     run = commands["run"]
     run.add_argument("achievement", choices=ACHIEVEMENTS, nargs="?", help="Omit to choose interactively")
     amount = run.add_mutually_exclusive_group()
@@ -125,7 +131,37 @@ def make_runner(config):
     limiter = WriteLimiter()
     primary = GitHubClient(config.token, limiter=limiter)
     helper = GitHubClient(config.helper_token, limiter=limiter) if config.helper_token else None
-    return WorkflowRunner(config, primary, helper)
+    runner = WorkflowRunner(config, primary, helper)
+    primary.report = lambda message: runner.report(message)
+    if helper:
+        helper.report = lambda message: runner.report(message)
+    return runner
+
+
+def cleanup_repository(args, config, state_dir):
+    path = state_dir / "progress.sqlite3"
+    if not path.exists():
+        print("[]" if args.json else "No recorded workflow branches to clean up.")
+        return 0
+    config.validate(credentials=True)
+    runner = make_runner(config)
+    runner.preflight()
+    with RunLock(state_dir), StateStore(path) as store:
+        if args.json:
+            results = cleanup_tracked(runner, store, execute=args.execute)
+            print(json.dumps(results, indent=2))
+        else:
+            with Console().activity("Checking recorded branches against GitHub") as activity:
+                runner.report = activity.update
+                results = cleanup_tracked(runner, store, execute=args.execute)
+            if results:
+                for result in results:
+                    Console().say(f"{result['status'].upper()}: {result['branch']} / {result['reason']}")
+            else:
+                print("No recorded workflow branches to clean up.")
+            if not args.execute:
+                print("Preview only. Add --execute to remove branches marked READY.")
+    return 1 if any(result["status"] == "error" for result in results) else 0
 
 
 def show_status(args, config, state_dir):
@@ -221,6 +257,8 @@ def execute_run(args, config, state_dir):
             console.progress(index + 1, count)
             if result.get("warning"):
                 print(result["warning"], file=sys.stderr)
+            if result.get("cleanup", {}).get("rate_limited"):
+                raise GitHubError("The completed operation was saved. Stopping because cleanup hit a rate limit; retry cleanup after GitHub's wait time.")
         console.say("Workflow results verified and saved.", "green")
     if not args.skip_badge_check:
         with console.activity("Checking whether GitHub displays the badge") as activity:
@@ -313,6 +351,7 @@ def interactive(env_file, state_dir, repo):
             Choice("setup", "Connect or create a repository", "Account and repository setup"),
             Choice("doctor", "Check connection", "Validate account and repository access"),
             Choice("reset-history", "Preview history reset", "Preserve files and a backup branch"),
+            Choice("cleanup", "Clean up merged branches", "Preview leftover workflow branches"),
             Choice("back", "Exit"),
         ])
         if choice == "back":
@@ -324,6 +363,11 @@ def interactive(env_file, state_dir, repo):
                 console.say(config.redact(str(exc)), "gold")
         elif choice == "status":
             main(common + ["status", "--history"])
+        elif choice == "cleanup":
+            if main(common + ["cleanup"]) == 0:
+                action = console.choose("CLEANUP", [Choice("execute", "Remove verified merged branches"), Choice("back", "Back")])
+                if action == "execute":
+                    main(common + ["cleanup", "--execute"])
         elif choice == "setup":
             section = console.choose("ACCOUNT SETTINGS", [
                 Choice("primary", "Primary account and repository"),
@@ -362,6 +406,8 @@ def main(argv=None):
             show_status(args, config, state_dir)
         elif args.command == "verify":
             return verify_badges(args, config)
+        elif args.command == "cleanup":
+            return cleanup_repository(args, config, state_dir)
         elif args.command == "doctor":
             if not args.json:
                 config = ensure_credentials(config, env_file, args.workflow, allow_create=False)

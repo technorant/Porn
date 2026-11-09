@@ -1,7 +1,8 @@
 """Small REST/GraphQL client. Ambiguous writes are never automatically replayed."""
 import json
+import math
 import time
-from datetime import datetime, timezone
+from datetime import timezone
 from email.utils import parsedate_to_datetime
 from http.client import HTTPException
 from urllib.error import HTTPError, URLError
@@ -11,9 +12,10 @@ from . import __version__
 
 
 class GitHubError(RuntimeError):
-    def __init__(self, message: str, status: int | None = None):
+    def __init__(self, message: str, status: int | None = None, *, retry_after: float | None = None):
         super().__init__(message)
         self.status = status
+        self.retry_after = retry_after
 
 
 class NoRedirect(HTTPRedirectHandler):
@@ -39,38 +41,87 @@ class GitHubClient:
     BASE = "https://api.github.com"
 
     def __init__(self, token, *, limiter=None, opener=None, sleep=time.sleep,
-                 timeout=30, retries=2, max_wait=60):
+                 timeout=30, retries=2, max_wait=300, clock=time.time, report=None):
         self._token = token
         self.limiter = limiter or WriteLimiter()
         self.opener = opener or build_opener(NoRedirect())
         self.sleep, self.timeout, self.retries, self.max_wait = sleep, timeout, retries, max_wait
+        self.clock = clock
+        self.report = report or (lambda message: None)
+        self.quota_resets = {}
 
     def _clean(self, text):
         return str(text).replace(self._token, "[REDACTED]") if self._token else str(text)
 
-    def _retry_delay(self, headers, attempt):
-        retry = headers.get("Retry-After")
+    @staticmethod
+    def _headers(headers):
+        return {key.lower(): value for key, value in headers.items()}
+
+    def _retry_delay(self, headers, attempt, *, limited=False):
+        headers = self._headers(headers)
+        delays = []
+        retry = headers.get("retry-after")
         if retry:
             try:
-                return max(0, float(retry))
+                delay = float(retry)
+                if math.isfinite(delay):
+                    delays.append(max(0, delay))
             except ValueError:
                 try:
-                    return max(0, (parsedate_to_datetime(retry) - datetime.now(timezone.utc)).total_seconds())
+                    date = parsedate_to_datetime(retry)
+                    if date.tzinfo is None:
+                        date = date.replace(tzinfo=timezone.utc)
+                    delays.append(max(0, date.timestamp() - self.clock()))
                 except (TypeError, ValueError):
                     pass
-        if headers.get("X-RateLimit-Remaining") == "0":
+        if headers.get("x-ratelimit-remaining") == "0":
             try:
-                return max(1, float(headers["X-RateLimit-Reset"]) - time.time() + 1)
+                reset = float(headers["x-ratelimit-reset"])
+                if math.isfinite(reset):
+                    delays.append(max(1, reset - self.clock() + 1))
             except (ValueError, KeyError):
                 pass
+        if delays:
+            return max(delays) * (2 ** attempt if limited else 1)
+        if limited:
+            return 60 * 2 ** attempt
         return 2 ** (attempt + 1)
+
+    def _remember_quota(self, headers, resource):
+        headers = self._headers(headers)
+        resource = headers.get("x-ratelimit-resource", resource)
+        if headers.get("x-ratelimit-remaining") == "0":
+            try:
+                reset = float(headers["x-ratelimit-reset"])
+                if math.isfinite(reset):
+                    self.quota_resets[resource] = reset
+            except (KeyError, ValueError):
+                pass
+        elif "x-ratelimit-remaining" in headers:
+            self.quota_resets.pop(resource, None)
+
+    def _pause_for_limit(self, delay):
+        if delay > self.max_wait:
+            raise GitHubError(f"GitHub rate limited. Retry after at least {math.ceil(delay)} seconds; progress has been kept.", retry_after=delay)
+        self.report(f"GitHub rate limit: waiting {math.ceil(delay)} seconds")
+        self.sleep(delay)
+
+    def _respect_quota(self, resource):
+        reset = self.quota_resets.get(resource)
+        if reset is not None:
+            delay = reset - self.clock() + 1
+            if delay > 0:
+                self._pause_for_limit(delay)
+            self.quota_resets.pop(resource, None)
 
     def request(self, method, path, payload=None, *, read_only=False):
         if not path.startswith("/") or path.startswith("//"):
             raise ValueError("API paths must be relative to api.github.com.")
         read_only = read_only or method == "GET"
         data = json.dumps(payload).encode("utf-8") if payload is not None else None
+        resource = "graphql" if path == "/graphql" else "core"
         for attempt in range(self.retries + 1):
+            self._respect_quota(resource)
             if not read_only:
                 self.limiter.wait()
             request = Request(self.BASE + path, data=data, method=method, headers={
@@ -82,13 +133,28 @@ class GitHubClient:
             })
             try:
                 with self.opener.open(request, timeout=self.timeout) as response:
+                    headers = self._headers(getattr(response, "headers", {}))
                     raw = response.read()
+                self._remember_quota(headers, resource)
                 if not raw:
                     return {}
                 try:
-                    return json.loads(raw)
+                    result = json.loads(raw)
                 except (ValueError, UnicodeError) as exc:
                     raise GitHubError("GitHub returned invalid JSON; inspect remote state before retrying writes.") from exc
+                if path == "/graphql" and isinstance(result, dict) and result.get("errors"):
+                    errors = result["errors"]
+                    only_limits = all(error.get("type") == "RATE_LIMITED" or "rate limit" in error.get("message", "").lower() for error in errors)
+                    partial_data = result.get("data") or {}
+                    rejected = isinstance(partial_data, dict) and not any(value is not None for value in partial_data.values())
+                    if only_limits and rejected:
+                        delay = self._retry_delay(headers, attempt, limited=True)
+                        if attempt < self.retries:
+                            self._pause_for_limit(delay)
+                            self.quota_resets.pop(resource, None)
+                            continue
+                        raise GitHubError(f"GitHub GraphQL rate limited. Retry after at least {math.ceil(delay)} seconds.", retry_after=delay)
+                return result
             except HTTPError as exc:
                 try:
                     error = json.loads(exc.read())
@@ -97,14 +163,20 @@ class GitHubClient:
                     message = exc.reason
                 finally:
                     exc.close()
+                headers = self._headers(exc.headers)
+                self._remember_quota(headers, resource)
                 limited = exc.code == 429 or (exc.code == 403 and (
-                    exc.headers.get("Retry-After") is not None
-                    or exc.headers.get("X-RateLimit-Remaining") == "0"
+                    headers.get("retry-after") is not None
+                    or headers.get("x-ratelimit-remaining") == "0"
                     or "rate limit" in str(message).lower()))
                 retryable = limited or (read_only and exc.code >= 500)
-                delay = self._retry_delay(exc.headers, attempt)
+                delay = self._retry_delay(headers, attempt, limited=limited)
                 if retryable and attempt < self.retries and delay <= self.max_wait:
-                    self.sleep(delay)
+                    if limited:
+                        self._pause_for_limit(delay)
+                        self.quota_resets.pop(resource, None)
+                    else:
+                        self.sleep(delay)
                     continue
                 hint = ""
                 if limited:
@@ -115,7 +187,8 @@ class GitHubClient:
                     hint = " Check repository access, token permissions, and repository settings."
                 elif not read_only and exc.code >= 500:
                     hint = " Write outcome is uncertain; inspect remote state before retrying."
-                raise GitHubError(self._clean(f"GitHub HTTP {exc.code}: {message}.{hint}"), exc.code) from None
+                raise GitHubError(self._clean(f"GitHub HTTP {exc.code}: {message}.{hint}"), exc.code,
+                                  retry_after=delay if limited else None) from None
             except (URLError, TimeoutError, OSError, HTTPException) as exc:
                 if read_only and attempt < self.retries:
                     self.sleep(2 ** (attempt + 1))

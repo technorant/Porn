@@ -5,6 +5,7 @@ from datetime import datetime
 from urllib.parse import quote, urlencode
 
 from .api import GitHubError
+from .cleanup import delete_merged_branch
 
 
 CATEGORIES_QUERY = """query Categories($owner: String!, $name: String!, $cursor: String) {
@@ -255,12 +256,13 @@ class WorkflowRunner:
         checkpoint(stage="delete_branch", verified=True)
         warning = None
         try:
-            self.primary.request("DELETE", f"{self.prefix}/git/refs/heads/{quote(branch, safe='')}")
+            cleanup = delete_merged_branch(self.primary, self.config.repo, branch, commit_sha)
+            if cleanup["status"] == "kept":
+                warning = f"PR merged; branch kept: {cleanup['reason']}"
         except GitHubError as exc:
-            # GitHub may already have deleted the branch after merging.
-            if exc.status != 404:
-                warning = self.config.redact(f"PR merged; branch cleanup failed for {branch}: {exc}")
-        return {"stage": "complete", "url": pr["html_url"], "warning": warning, "verified": True}
+            warning = self.config.redact(f"PR merged; branch cleanup failed for {branch}: {exc}")
+            cleanup = {"status": "error", "reason": warning, "rate_limited": exc.retry_after is not None}
+        return {"stage": "complete", "url": pr["html_url"], "warning": warning, "verified": True, "cleanup": cleanup}
 
     def quickdraw(self, operation_id, checkpoint):
         checkpoint(stage="open_issue")
