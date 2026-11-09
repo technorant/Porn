@@ -4,6 +4,8 @@ For the shortest setup, use the numbered steps in [README.md](README.md).
 
 ## Use a token limited to one repository
 
+These steps configure the **primary account's `GITHUB_TOKEN`** for a repository it owns. For the helper account, follow the README's [two-account setup](README.md#two-accounts-one-target-repository) and [helper token steps](README.md#how-to-create-the-helper-token). Both accounts use the same `TARGET_REPO`; the helper does not need to create or fork a repository.
+
 1. Open [Fine-grained personal access tokens](https://github.com/settings/personal-access-tokens).
 2. Generate a token. Set the resource owner to your account, set an expiration, and select **Only select repositories**.
 3. Choose the test repository and grant the permissions below for the workflows you need.
