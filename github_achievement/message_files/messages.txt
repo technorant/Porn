@@ -1,0 +1,13 @@
+# One activity commit message per line. Pair co-author credit is added automatically.
+Update {workflow} activity record
+Save the next {workflow} operation
+Refresh the {workflow} record in {path}
+Write current operation details for {workflow}
+Replace the previous {workflow} activity entry
+Store the latest {workflow} operation record
+Track this {workflow} run in the activity file
+Write a new {workflow} activity entry
+Capture the current {workflow} operation
+Keep the {workflow} activity record current
+Record another {workflow} run
+Include the latest {workflow} operation ID

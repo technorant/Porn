@@ -1,0 +1,13 @@
+# One PR title per line. Blank lines and comments are ignored.
+Record {badge} activity
+Save the next {badge} operation
+Update the {badge} activity record
+Add an operation record for {badge}
+Refresh the {badge} workflow record
+Store the latest {badge} activity
+Track a new {badge} operation
+Write the next {badge} activity entry
+Capture this {badge} workflow run
+Keep the {badge} operation record current
+Record another {badge} workflow run
+Include the latest {badge} operation

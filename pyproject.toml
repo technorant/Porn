@@ -16,3 +16,6 @@ github-achievement = "github_achievement.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["github_achievement*"]
+
+[tool.setuptools.package-data]
+github_achievement = ["message_files/*.txt"]

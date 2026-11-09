@@ -193,6 +193,26 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(self.primary.calls, [])
         self.assertEqual(self.store.history(), [])
 
+    def test_file_selection_continues_across_restarts_and_failed_attempts(self):
+        self.execute("pull-shark")
+        failed = self.store.start("alice", "alice/lab", "pull-shark")
+        self.store.finish(failed, "failed")
+        self.store.start("bob", "alice/lab", "pull-shark")
+        self.store.start("alice", "alice/other", "pull-shark")
+        self.store.start("alice", "alice/lab", "pair-extraordinaire")
+        primary = FakeGitHub()
+        runner = WorkflowRunner(self.config, primary)
+        runner.preflight("pull-shark")
+        with StateStore(Path(self.temp.name) / "progress.sqlite3") as reopened:
+            runner.run_one("pull-shark", reopened)
+            latest = reopened.history(account="alice", repo="alice/lab")[0]
+            self.assertEqual(latest["detail"]["message_index"], 3)
+            self.assertEqual(reopened.attempt_count("ALICE", "ALICE/LAB", "pull-shark"), 3)
+        expected = render_messages(self.config, "pull-shark", latest["id"], message_index=2)
+        pr = next(p for method, path, p in primary.calls if method == "POST" and path.endswith("/pulls"))
+        self.assertEqual(pr["title"], expected["pr_title"])
+        self.assertEqual(pr["body"], expected["pr_body"])
+
     def test_message_length_with_resolved_coauthor_is_checked_before_writes(self):
         self.runner.preflight("pair-extraordinaire")
         self.runner.coauthor_name = "B" * 65536

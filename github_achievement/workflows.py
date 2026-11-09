@@ -6,7 +6,7 @@ from urllib.parse import quote, urlencode
 
 from .api import GitHubError
 from .cleanup import delete_merged_branch
-from .messages import PR_WORKFLOWS, PREVIEW_OPERATION, render_messages
+from .messages import PR_WORKFLOWS, render_messages, validate_message_templates
 
 
 CATEGORIES_QUERY = """query Categories($owner: String!, $name: String!, $cursor: String) {
@@ -51,11 +51,12 @@ class WorkflowRunner:
         self.helper_user = None
         self.coauthor_name = ""
         self.coauthor_email = ""
+        self.message_templates = None
 
     def preflight(self, workflow=None):
         self.config.validate(workflow, credentials=True)
         if workflow in PR_WORKFLOWS:
-            render_messages(self.config, workflow, PREVIEW_OPERATION)
+            self.message_templates = validate_message_templates(self.config, workflow)
         self.report("Checking primary account and repository access")
         self.user = self.primary.request("GET", "/user")
         self.repository = self.primary.request("GET", self.prefix)
@@ -88,6 +89,8 @@ class WorkflowRunner:
                     raise ValueError("The helper account needs an accepted collaborator invitation and a classic PAT with repo scope.")
             else:
                 self.resolve_coauthor()
+                validate_message_templates(self.config, workflow, templates=self.message_templates,
+                                           coauthor=(self.coauthor_name, self.coauthor_email))
         if workflow == "galaxy-brain":
             if not self.repository.get("has_discussions"):
                 raise ValueError("Enable Discussions and an answerable category (such as Q&A) in repository settings.")
@@ -203,7 +206,9 @@ class WorkflowRunner:
             elif workflow == "galaxy-brain":
                 result = self.galaxy_brain(operation_id, checkpoint)
             else:
-                result = self.pull_request(workflow, operation_id, checkpoint)
+                message_index = store.attempt_count(self.user["login"], self.config.repo, workflow) - 1
+                checkpoint(message_index=message_index + 1)
+                result = self.pull_request(workflow, operation_id, checkpoint, message_index=message_index)
             store.finish(operation_id, **result)
             return result
         except KeyboardInterrupt:
@@ -213,9 +218,10 @@ class WorkflowRunner:
             store.finish(operation_id, "failed", error=self.config.redact(str(exc)))
             raise
 
-    def pull_request(self, workflow, operation_id, checkpoint):
+    def pull_request(self, workflow, operation_id, checkpoint, *, message_index=0):
         messages = render_messages(self.config, workflow, operation_id,
-                                   coauthor=(self.coauthor_name, self.coauthor_email))
+                                   coauthor=(self.coauthor_name, self.coauthor_email),
+                                   message_index=message_index, templates=self.message_templates)
         branch = f"achievement/{workflow}/{operation_id}"
         path = f".github-achievements/{workflow}.json"
         base_sha = self.head()

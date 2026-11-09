@@ -1,0 +1,13 @@
+# One PR description per line. Use \n for a newline within a message.
+Update `{path}` with the next {badge} operation record in `{repo}`.
+Save this {badge} run in `{path}`.\n\nThe record includes the workflow name and operation ID.
+Refresh the activity record for {badge} in `{repo}`.\n\nChanged file: `{path}`.
+Add the current operation details to `{path}` for the {badge} workflow.
+Replace the previous activity record in `{path}` with this {badge} operation.
+Store the latest {badge} workflow record in `{repo}` using `{path}`.
+Track this operation in `{path}`.\n\nThe file records the {workflow} workflow and its operation ID.
+Write the next {badge} entry to the activity file at `{path}`.
+Capture the current {badge} run in `{repo}`.\n\nThe activity record is stored in `{path}`.
+Keep `{path}` current with the operation ID for this {badge} run.
+Record another {badge} workflow operation in `{path}` for `{repo}`.
+Include this operation in the {badge} activity record.\n\nThis update writes `{path}`.

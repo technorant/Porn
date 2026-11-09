@@ -17,7 +17,8 @@ from .badges import check_badges
 from .onboarding import ensure_credentials, setup
 from .ui import Choice, Console
 from .cleanup import cleanup_tracked
-from .messages import MESSAGE_DEFAULTS, MESSAGE_LABELS, PR_WORKFLOWS, PREVIEW_OPERATION, render_messages
+from .messages import (MESSAGE_FILES, MESSAGE_LABELS, PR_WORKFLOWS, PREVIEW_OPERATION,
+                       message_directory, render_messages, validate_message_templates)
 
 
 def positive_int(value):
@@ -95,7 +96,7 @@ def build_parser():
     run.add_argument("--coauthor-name")
     run.add_argument("--coauthor-email")
     run.add_argument("--category-id")
-    for field in MESSAGE_DEFAULTS:
+    for field in MESSAGE_FILES:
         run.add_argument("--" + field.replace("_", "-"),
                          help=f"{MESSAGE_LABELS[field]} template; overrides {field.upper()} in .env (PR workflows only)")
     run.add_argument("--wait-for-badge", type=badge_wait, default=0, help="After successful operations, poll for public badge visibility (max 600 seconds)")
@@ -207,7 +208,9 @@ def show_plan(args, config):
         console.say("Co-author identity is resolved from the helper; GitHub must recognize both commit authors.", "muted")
     if args.achievement in PR_WORKFLOWS:
         messages = render_messages(config, args.achievement, PREVIEW_OPERATION)
-        console.say("\nMessage preview / sample operation ID; each real operation gets a new ID.", "cyan")
+        console.say(f"\nMessage files: {message_directory(config)}", "cyan")
+        console.say("Messages are selected automatically in file order using saved progress.", "muted")
+        console.say("Message preview / first entries and sample ID; execution uses the next saved position.", "cyan")
         for field, message in messages.items():
             console.say(f"  {MESSAGE_LABELS[field]}:", "gold")
             for line in config.redact(message).splitlines():
@@ -323,38 +326,18 @@ def run_wizard(env_file, state_dir, repo=None):
     if not config.repo:
         config = setup(config, env_file, workflow)
     common = ["--env-file", str(env_file), "--state-dir", str(state_dir), "--repo", config.repo]
-    overrides = {}
-    while True:
-        command = common + ["run", workflow, *amount]
-        command.extend(f"--{field.replace('_', '-')}={value}" for field, value in overrides.items())
-        preview = build_parser().parse_args(command)
-        show_plan(preview, config)
-        actions = [
-            Choice("execute", "Run this workflow", "Verify prerequisites, perform operations, check badge visibility"),
-            Choice("preview", "Keep as preview", "No GitHub changes"),
-        ]
-        if workflow in PR_WORKFLOWS:
-            actions.append(Choice("messages", "Customize messages", "Edit PR, commit, and merge text for this run"))
-        action = console.choose("03 / Ready when you are", actions + [Choice("back", "Back")])
-        if action == "messages":
-            console.say("Use {badge}, {workflow}, {repo}, or {path}. Type \\n for a new line.")
-            console.say("Enter keeps the displayed template. Edits apply to this run; use .env to save defaults.")
-            edits = {field: console.ask(MESSAGE_LABELS[field], getattr(config, field) or default)
-                     for field, default in MESSAGE_DEFAULTS.items()}
-            updated = replace(config, **edits)
-            try:
-                render_messages(updated, workflow, PREVIEW_OPERATION)
-            except ValueError as exc:
-                console.say(config.redact(str(exc)), "gold")
-                console.say("Edits were not applied. Choose Customize messages to try again.", "muted")
-            else:
-                config = updated
-                overrides.update(edits)
-            continue
-        if action == "execute":
-            return main(command + ["--execute"])
-        console.say("Preview only. Your plan has not been executed.", "muted")
-        return 0
+    command = common + ["run", workflow, *amount]
+    preview = build_parser().parse_args(command)
+    show_plan(preview, config)
+    action = console.choose("03 / Ready when you are", [
+        Choice("execute", "Run this workflow", "Use the predefined messages and verify the workflow"),
+        Choice("preview", "Keep as preview", "No GitHub changes"),
+        Choice("back", "Back"),
+    ])
+    if action == "execute":
+        return main(command + ["--execute"])
+    console.say("Preview only. Your plan has not been executed.", "muted")
+    return 0
 
 
 def interactive(env_file, state_dir, repo):
@@ -453,20 +436,20 @@ def main(argv=None):
                 if (args.execute or args.dry_run or args.count is not None or args.tier
                         or args.coauthor_name or args.coauthor_email or args.category_id
                         or args.wait_for_badge or args.skip_badge_check or args.interval != 10
-                        or any(getattr(args, field) is not None for field in MESSAGE_DEFAULTS)):
+                        or any(getattr(args, field) is not None for field in MESSAGE_FILES)):
                     raise ValueError("Specify an achievement ID when using run options; use plain run for the interactive chooser.")
                 return run_wizard(env_file, state_dir, repo)
             overrides = {key: getattr(args, arg) for key, arg in (
                 ("coauthor_name", "coauthor_name"), ("coauthor_email", "coauthor_email"), ("category_id", "category_id")
             ) if getattr(args, arg) is not None}
-            message_overrides = {field: getattr(args, field) for field in MESSAGE_DEFAULTS
+            message_overrides = {field: getattr(args, field) for field in MESSAGE_FILES
                                  if getattr(args, field) is not None}
             if message_overrides and args.achievement not in PR_WORKFLOWS:
                 raise ValueError("Custom PR messages apply to Pull Shark, Pair Extraordinaire, and YOLO.")
             overrides.update(message_overrides)
             config = replace(config, **overrides)
             if args.achievement in PR_WORKFLOWS:
-                render_messages(config, args.achievement, PREVIEW_OPERATION)
+                validate_message_templates(config, args.achievement)
             if args.execute:
                 config = ensure_credentials(config, env_file, args.achievement)
             execute_run(args, config, state_dir)

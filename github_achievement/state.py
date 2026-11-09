@@ -97,6 +97,12 @@ class StateStore:
             WHERE account=? AND repo=? AND workflow=? AND status='completed'""",
             (account.lower(), repo.lower(), workflow)).fetchone()[0]
 
+    def attempt_count(self, account, repo, workflow):
+        """Include failed/interrupted attempts so later runs advance through message files."""
+        return self.db.execute("""SELECT COUNT(*) FROM operations
+            WHERE account=? AND repo=? AND workflow=?""",
+            (account.lower(), repo.lower(), workflow)).fetchone()[0]
+
     def history(self, *, account=None, repo=None, limit=25):
         filters, params = [], []
         for column, value in (("account", account), ("repo", repo)):

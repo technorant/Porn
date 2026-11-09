@@ -3,3 +3,4 @@ include requirements.txt
 include main.py
 include ADVANCED.md
 recursive-include tests *.py
+recursive-include github_achievement/message_files *.txt

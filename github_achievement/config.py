@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Mapping
 
-from .messages import MESSAGE_DEFAULTS
+from .messages import MESSAGE_FILES
 
 
 def read_env(path: Path) -> dict[str, str]:
@@ -51,6 +51,7 @@ class Config:
     commit_message: str = ""
     merge_title: str = ""
     merge_message: str = ""
+    messages_dir: Path | None = None
 
     @classmethod
     def load(cls, path: Path, environ: Mapping[str, str] | None = None, repo: str | None = None):
@@ -60,12 +61,14 @@ class Config:
         # Shell credentials override file credentials, including the GH_TOKEN alias.
         token = (env.get("GITHUB_TOKEN") or env.get("GH_TOKEN")
                  or values.get("GITHUB_TOKEN") or values.get("GH_TOKEN", ""))
+        messages_dir = values.get("MESSAGES_DIR", "")
         return cls(repo=repo or values.get("TARGET_REPO", ""), token=token,
                    helper_token=values.get("HELPER_TOKEN", ""),
                    coauthor_name=values.get("COAUTHOR_NAME", ""),
                    coauthor_email=values.get("COAUTHOR_EMAIL", ""),
                    category_id=values.get("DISCUSSION_CATEGORY_ID", ""),
-                   **{key: values.get(key.upper(), "") for key in MESSAGE_DEFAULTS})
+                   messages_dir=(path.parent / messages_dir).resolve() if messages_dir else None,
+                   **{key: values.get(key.upper(), "") for key in MESSAGE_FILES})
 
     def validate(self, workflow: str | None = None, *, credentials: bool = False):
         validate_repo(self.repo)

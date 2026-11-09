@@ -1,0 +1,13 @@
+# One merge description per line. Use \n for a newline within a message.
+Include the recorded {workflow} operation in {repo}.
+Merge the next {badge} operation record from `{path}` into the default branch.
+Include the updated activity file for {badge}.\n\nRecorded file: `{path}`.
+Merge the current {workflow} operation details into `{repo}`.
+Apply the refreshed operation record in `{path}` for {badge}.
+Include the latest {badge} activity record in the default branch of `{repo}`.
+Merge the activity-file change for this {workflow} run.
+Bring the new {badge} operation record into `{repo}` through this merge.
+Include the current workflow and operation ID stored in `{path}`.
+Keep the merged activity file current with this {badge} operation.
+Include another {workflow} operation record from `{path}`.
+Merge the latest {badge} workflow record into the default branch.
